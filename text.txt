@@ -1,0 +1,13 @@
+routes : 
+admin/
+admin/dashboard
+admin/meeting
+
+
+meeting/id
+
+
+features :
+mail(from,to,sub,body)
+meeting(emailID[])
+
