@@ -1,5 +1,5 @@
 // pages/api/groups/[id]/admins.js
-import dbConnect, { Conversation, User } from '../../../../lib/db';
+import dbConnect, { Conversation, User, Message } from '../../../../lib/db';
 
 export default async function handler(req, res) {
   await dbConnect();
@@ -62,7 +62,7 @@ export default async function handler(req, res) {
         }
 
         // member must already be part of the group
-        const isParticipant = conversation.participants.some(
+        const isParticipant = (conversation.participants || []).some(
           (p) => p.toString() === memberId.toString()
         );
         if (!isParticipant) {
@@ -84,12 +84,33 @@ export default async function handler(req, res) {
 
         await conversation.save();
 
+        // Prepare system message
+        const actor = await User.findById(actorId).lean();
+        const member = await User.findById(memberId).lean();
+        const actorName = actor?.username || String(actorId);
+        const memberName = member?.username || String(memberId);
+        const text = `${actorName} made ${memberName} a group admin.`;
+
+        const sysMsg = new Message({
+          conversation: id,
+          sender: actorId,
+          type: 'system',
+          text,
+          readBy: [actorId],
+        });
+        const saved = await sysMsg.save();
+        await saved.populate('sender', 'username');
+        await saved.populate('readBy', 'username');
+
         const updated = await Conversation.findById(id)
           .populate('participants', 'username role')
           .populate('admins', 'username role')
           .lean();
 
-        return res.status(200).json(updated);
+        return res.status(200).json({
+          ...updated,
+          systemMessage: saved,
+        });
       } catch (err) {
         console.error('Error promoting member to admin', err);
         return res.status(500).json({ message: 'Server error' });

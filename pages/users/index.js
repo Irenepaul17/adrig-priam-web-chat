@@ -52,8 +52,8 @@ export default function UsersPage() {
   const currentUserRole = getCurrentUserRole();
 
   // Only director & project_manager are allowed to manage groups
-  const isAdminRole =
-    currentUserRole === 'director' || currentUserRole === 'project_manager';
+  const normalizedRole = (currentUserRole || '').toLowerCase();
+  const isAdminRole = normalizedRole === 'director' || normalizedRole === 'project_manager';
 
   async function handleStartChat(targetUserId) {
     if (targetUserId === currentUserId) {
@@ -111,8 +111,8 @@ export default function UsersPage() {
         const convos = Array.isArray(data.conversations)
           ? data.conversations
           : Array.isArray(data)
-          ? data
-          : [];
+            ? data
+            : [];
 
         setConversations(convos);
       } catch (err) {

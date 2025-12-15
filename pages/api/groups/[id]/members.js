@@ -1,5 +1,5 @@
 // pages/api/groups/[id]/members.js
-import dbConnect, { Conversation, User } from '../../../../lib/db';
+import dbConnect, { Conversation, User, Message } from '../../../../lib/db';
 
 export default async function handler(req, res) {
   await dbConnect();
@@ -71,12 +71,33 @@ export default async function handler(req, res) {
           await conversation.save();
         }
 
+        // Build system message text using usernames if available
+        const actor = await User.findById(actorId).lean();
+        const member = await User.findById(memberId).lean();
+        const actorName = actor?.username || String(actorId);
+        const memberName = member?.username || String(memberId);
+        const text = `${actorName} added ${memberName} to the group.`;
+
+        const sysMsg = new Message({
+          conversation: id,
+          sender: actorId,
+          type: 'system',
+          text,
+          readBy: [actorId],
+        });
+        const saved = await sysMsg.save();
+        await saved.populate('sender', 'username');
+        await saved.populate('readBy', 'username');
+
         const updated = await Conversation.findById(id)
           .populate('participants', 'username role')
           .populate('admins', 'username role')
           .lean();
 
-        return res.status(200).json(updated);
+        return res.status(200).json({
+          ...updated,
+          systemMessage: saved,
+        });
       } catch (err) {
         console.error('Error adding member', err);
         return res.status(500).json({ message: 'Server error' });
@@ -114,7 +135,7 @@ export default async function handler(req, res) {
         }
 
         // Remove from participants
-        conversation.participants = conversation.participants.filter(
+        conversation.participants = (conversation.participants || []).filter(
           (p) => p.toString() !== memberId
         );
 
@@ -127,12 +148,35 @@ export default async function handler(req, res) {
 
         await conversation.save();
 
+        // Build system message
+        const actor = await User.findById(actorId).lean();
+        const member = await User.findById(memberId).lean();
+        const actorName = actor?.username || String(actorId);
+        const memberName = member?.username || String(memberId);
+        const text = actorIsSelf
+          ? `${actorName} left the group.`
+          : `${actorName} removed ${memberName} from the group.`;
+
+        const sysMsg = new Message({
+          conversation: id,
+          sender: actorId,
+          type: 'system',
+          text,
+          readBy: [actorId],
+        });
+        const saved = await sysMsg.save();
+        await saved.populate('sender', 'username');
+        await saved.populate('readBy', 'username');
+
         const updated = await Conversation.findById(id)
           .populate('participants', 'username role')
           .populate('admins', 'username role')
           .lean();
 
-        return res.status(200).json(updated);
+        return res.status(200).json({
+          ...updated,
+          systemMessage: saved,
+        });
       } catch (err) {
         console.error('Error removing member', err);
         return res.status(500).json({ message: 'Server error' });

@@ -1,5 +1,5 @@
 // pages/api/groups/[id]/info.js
-import dbConnect, { Conversation, User } from '../../../../lib/db';
+import dbConnect, { Conversation, User, Message } from '../../../../lib/db';
 
 export default async function handler(req, res) {
   await dbConnect();
@@ -60,6 +60,9 @@ export default async function handler(req, res) {
           return res.status(403).json({ message: auth.message });
         }
 
+        const oldName = conversation.name || '';
+        const oldDesc = conversation.description || '';
+
         if (typeof name === 'string') {
           conversation.name = name.trim();
         }
@@ -69,12 +72,39 @@ export default async function handler(req, res) {
 
         await conversation.save();
 
+        // Build system message describing the change
+        const actor = await User.findById(actorId).lean();
+        const actorName = actor?.username || String(actorId);
+        const changes = [];
+        if (typeof name === 'string' && name.trim() !== oldName) {
+          changes.push(`name to "${conversation.name}"`);
+        }
+        if (typeof description === 'string' && description.trim() !== oldDesc) {
+          changes.push('description');
+        }
+        const changeText = changes.length ? changes.join(' and ') : 'group settings';
+        const text = `${actorName} updated ${changeText}.`;
+
+        const sysMsg = new Message({
+          conversation: id,
+          sender: actorId,
+          type: 'system',
+          text,
+          readBy: [actorId],
+        });
+        const saved = await sysMsg.save();
+        await saved.populate('sender', 'username');
+        await saved.populate('readBy', 'username');
+
         const updated = await Conversation.findById(id)
           .populate('participants', 'username role')
           .populate('admins', 'username role')
           .lean();
 
-        return res.status(200).json(updated);
+        return res.status(200).json({
+          ...updated,
+          systemMessage: saved,
+        });
       } catch (err) {
         console.error('Error updating group info', err);
         return res.status(500).json({ message: 'Server error' });
