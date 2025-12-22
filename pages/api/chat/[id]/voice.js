@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import dbConnect, { Conversation, Message } from '../../../../lib/db';
 import formidable from 'formidable';
-import { saveFileToPublic } from '../../../../lib/file-utils';
+import { uploadToS3 } from '../../../../lib/s3';
 
 export const config = { api: { bodyParser: false } };
 
@@ -67,16 +67,24 @@ export default async function handler(req, res) {
         if (Array.isArray(fileEntry)) fileEntry = fileEntry[0];
 
         try {
-          const { publicPath, originalName, mimeType, size } = saveFileToPublic(fileEntry);
+          const fileBuffer = fs.readFileSync(fileEntry.filepath || fileEntry.path);
+          const originalName = fileEntry.originalFilename || `voice-${Date.now()}.webm`;
+          const mimeType = fileEntry.mimetype || 'audio/webm';
+          const size = fileEntry.size || 0;
+
+          const { url } = await uploadToS3(fileBuffer, originalName, mimeType);
+
+          // clean up
+          try { fs.unlinkSync(fileEntry.filepath || fileEntry.path); } catch (e) { }
 
           const message = new Message({
             conversation: id,
             sender: senderId,
             text: String(text),
             type: 'audio',
-            audioUrl: publicPath,
+            audioUrl: url,
             audioDuration: duration,
-            fileUrl: publicPath,
+            fileUrl: url,
             fileName: originalName,
             mimeType,
             fileSize: size,

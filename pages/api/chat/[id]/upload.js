@@ -1,7 +1,7 @@
 // pages/api/chat/[id]/upload.js
 import dbConnect, { Conversation, Message } from '../../../../lib/db';
 import formidable from 'formidable';
-import { saveFileToPublic } from '../../../../lib/file-utils';
+import { uploadToS3 } from '../../../../lib/s3';
 import fs from 'fs';
 import path from 'path';
 
@@ -72,7 +72,15 @@ export default async function handler(req, res) {
 
         // Save file using helper (throws if no tmp path)
         try {
-          const { publicPath, originalName, mimeType, size } = saveFileToPublic(fileEntry);
+          const fileBuffer = fs.readFileSync(fileEntry.filepath || fileEntry.path);
+          const originalName = fileEntry.originalFilename || `file-${Date.now()}`;
+          const mimeType = fileEntry.mimetype || 'application/octet-stream';
+          const size = fileEntry.size || 0;
+
+          const { url } = await uploadToS3(fileBuffer, originalName, mimeType);
+
+          // clean up
+          try { fs.unlinkSync(fileEntry.filepath || fileEntry.path); } catch (e) { }
 
           const msgType = mimeToMessageType(mimeType || fields.type || '');
           const message = new Message({
@@ -80,7 +88,7 @@ export default async function handler(req, res) {
             sender: senderId,
             text: String(text), // ensure string
             type: msgType,
-            fileUrl: publicPath,
+            fileUrl: url,
             fileName: originalName,
             mimeType,
             fileSize: size,

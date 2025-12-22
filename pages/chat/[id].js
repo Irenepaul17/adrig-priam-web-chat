@@ -1,8 +1,9 @@
 // pages/chat/[id].js
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { io } from 'socket.io-client';
 
-import { useRef } from 'react';
+
 
 
 const FALLBACK_USER_ID = '69334e1b1297aec66afd63d1'; // safe fallback
@@ -11,6 +12,7 @@ export default function ChatPage() {
 
   const [swipeX, setSwipeX] = useState(0);
   const [swipingMsgId, setSwipingMsgId] = useState(null);
+
 
   const swipeStartX = useRef(null);
   const swipeStartY = useRef(null);
@@ -99,6 +101,44 @@ export default function ChatPage() {
       setCurrentUserRole(null);
     }
   }, []);
+
+  // ---------- socket.io ----------
+  const socketRef = useRef(null);
+
+  useEffect(() => {
+    // init socket
+    socketRef.current = io();
+
+    socketRef.current.on('connect', () => {
+      console.log('Socket connected:', socketRef.current.id);
+    });
+
+    return () => {
+      if (socketRef.current) socketRef.current.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!id || !socketRef.current) return;
+
+    console.log('Joining room:', id);
+    socketRef.current.emit('join_room', id);
+
+    const handleReceiveMessage = (msg) => {
+      console.log('Received socket message:', msg);
+      setMessages(prev => {
+        // avoid duplicates
+        if (prev.some(m => String(m._id) === String(msg._id))) return prev;
+        return [...prev, msg];
+      });
+    };
+
+    socketRef.current.on('receive_message', handleReceiveMessage);
+
+    return () => {
+      socketRef.current.off('receive_message', handleReceiveMessage);
+    };
+  }, [id]);
 
   // seen modal helpers
   function openSeenModal(readBy = [], sender = null) {
@@ -517,6 +557,9 @@ export default function ChatPage() {
         return;
       }
       setMessages(prev => [...prev, data]);
+      if (socketRef.current) {
+        socketRef.current.emit('send_message', { room: id, message: data });
+      }
       setText('');
       setPendingMentions([]);
       setShowMentionDropdown(false);
@@ -573,6 +616,9 @@ export default function ChatPage() {
 
       if (!res.ok) { alert(data?.message || 'Failed to upload voice note'); return; }
       setMessages(prev => [...prev, data]);
+      if (socketRef.current) {
+        socketRef.current.emit('send_message', { room: id, message: data });
+      }
       showNotification('Voice note uploaded');
       setPendingMentions([]);
       setText('');
@@ -615,6 +661,9 @@ export default function ChatPage() {
 
       if (!res.ok) { alert(data?.message || 'Failed to upload file'); return; }
       setMessages(prev => [...prev, data]);
+      if (socketRef.current) {
+        socketRef.current.emit('send_message', { room: id, message: data });
+      }
       showNotification('File uploaded');
       setPendingMentions([]);
       setText('');

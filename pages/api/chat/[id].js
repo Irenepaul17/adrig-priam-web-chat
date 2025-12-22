@@ -1,14 +1,15 @@
 // pages/api/chat/[id].js
 import dbConnect, { Conversation, Message } from '../../../lib/db';
+import { uploadToS3 } from '../../../lib/s3';
 
 // defensive notify helpers (no-op if missing)
-let notifyUser = () => {};
-let notifyGroup = () => {};
+let notifyUser = () => { };
+let notifyGroup = () => { };
 try {
   const notify = require('../../../lib/notify');
   if (notify && typeof notify.notifyUser === 'function') notifyUser = notify.notifyUser;
   if (notify && typeof notify.notifyGroup === 'function') notifyGroup = notify.notifyGroup;
-} catch (e) {}
+} catch (e) { }
 
 // multipart parser
 async function parseMultipart(req) {
@@ -123,22 +124,30 @@ export default async function handler(req, res) {
         const fs = require('fs');
         const path = require('path');
 
-        const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-        if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
         const tmpPath = fileEntry.filepath || fileEntry.path;
         if (tmpPath && fs.existsSync(tmpPath)) {
-          const ext = path.extname(fileEntry.originalFilename || '');
-          const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-          const dest = path.join(uploadsDir, filename);
-          fs.renameSync(tmpPath, dest);
-          fileUrl = `/uploads/${filename}`;
-          fileMime = fileEntry.mimetype || null;
-          fileName = fileEntry.originalFilename || filename;
-          fileSize = fileEntry.size || null;
-        }
+          // Upload to S3
+          const fileBuffer = fs.readFileSync(tmpPath);
+          const originalName = fileEntry.originalFilename || `file-${Date.now()}`;
+          const mimeType = fileEntry.mimetype || 'application/octet-stream';
 
-        if (fileMime && fileMime.startsWith('audio/')) audioUrl = fileUrl;
+          try {
+            const { url } = await uploadToS3(fileBuffer, originalName, mimeType);
+            fileUrl = url;
+            fileMime = mimeType;
+            fileName = originalName;
+            fileSize = fileEntry.size || null;
+
+            // Setup audioUrl if audio
+            if (fileMime && fileMime.startsWith('audio/')) audioUrl = fileUrl;
+
+            // Clean up temp file
+            fs.unlinkSync(tmpPath);
+          } catch (uploadErr) {
+            console.error('S3 Upload Failed:', uploadErr);
+            return res.status(500).json({ message: 'File upload failed' });
+          }
+        }
       }
 
       // determine message type
