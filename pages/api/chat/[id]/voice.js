@@ -1,6 +1,7 @@
 // pages/api/chat/[id]/voice.js
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import dbConnect, { Conversation, Message } from '../../../../lib/db';
 import formidable from 'formidable';
 import { uploadToS3 } from '../../../../lib/s3';
@@ -14,9 +15,9 @@ export default async function handler(req, res) {
   const { id } = req.query;
   if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
 
-  const tmpDir = path.join(process.cwd(), 'tmp');
-  ensureDir(tmpDir);
-  ensureDir(path.join(process.cwd(), 'public', 'uploads'));
+  const tmpDir = os.tmpdir();
+  // ensureDir(tmpDir);
+  // ensureDir(path.join(process.cwd(), 'public', 'uploads'));
 
   try { await dbConnect(); } catch (e) {
     console.error('DB connect failed', e); return res.status(500).json({ message: 'DB connection failed', details: e.message });
