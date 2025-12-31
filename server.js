@@ -1,11 +1,14 @@
+require('dotenv').config({ path: '.env.local' });
 const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 const { Server } = require('socket.io');
+const { handleSendMessage } = require('./lib/socketController');
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
 const port = process.env.PORT || 3000;
+
 // when using middleware `hostname` and `port` must be provided below
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -17,6 +20,7 @@ app.prepare().then(() => {
     });
 
     const io = new Server(httpServer);
+    global.io = io;
 
     io.on('connection', (socket) => {
         console.log('Client connected:', socket.id);
@@ -26,17 +30,16 @@ app.prepare().then(() => {
             console.log(`Socket ${socket.id} joined room ${room}`);
         });
 
+        // NEW: Secure Message Handling (Bypasses HTTP)
+        socket.on('send_message_secure', (data, callback) => {
+            handleSendMessage(socket, io, data, callback);
+        });
+
+        // Legacy/Client-Relay (For compatibility)
         socket.on('send_message', (data) => {
-            // data should contain { room, message } or just the message object if room is inferred
-            // Assuming data includes room target or we rely on conversation ID
             const { room, message } = data;
             if (room && message) {
-                // broadcast to everyone in the room except the sender (optional, or include sender)
-                // usually we want to include sender if we optimize optimistic UI, but here we just broadcast to others
-                // for simplicity, let's broadcast to everyone in the room including sender if they need confirmation,
-                // OR use socket.to(room).emit to exclude sender.
-                // The existing frontend appends locally on success, so we might want to avoid duplicates.
-                // Let's use socket.to(room).emit to exclude the sender.
+                // broadcast to everyone in the room except the sender
                 socket.to(room).emit('receive_message', message);
             }
         });

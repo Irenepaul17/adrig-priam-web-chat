@@ -1,20 +1,21 @@
 import { useRouter } from 'next/router';
 import Link from 'next/link';
+import NotificationBell from '../../../components/NotificationBell';
 
 export default function CRMProjects() {
   const router = useRouter();
 
   const logout = () => {
-  try {
-    localStorage.removeItem('token');
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('userEmail');
-    localStorage.removeItem('currentUserId'); // <-- important
-  } catch (err) {
-    console.error('Error clearing auth data from localStorage', err);
-  }
-  router.push('/');
-};
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userRole');
+      localStorage.removeItem('userEmail');
+      localStorage.removeItem('currentUserId'); // <-- important
+    } catch (err) {
+      console.error('Error clearing auth data from localStorage', err);
+    }
+    router.push('/');
+  };
 
 
   return (
@@ -45,6 +46,8 @@ export default function CRMProjects() {
           >
             Chat
           </Link>
+
+          <NotificationBell userRole="crm" />
 
           <a
             onClick={logout}

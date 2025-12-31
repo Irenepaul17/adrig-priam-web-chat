@@ -1,44 +1,55 @@
-// Global notifications storage (in production, use database)
-let globalNotifications = [];
 
-export default function handler(req, res) {
-  let notifications = globalNotifications;
+import dbConnect, { Notification } from '../../lib/db';
+
+export default async function handler(req, res) {
+  try {
+    await dbConnect();
+  } catch (error) {
+    return res.status(500).json({ message: 'Database connection failed' });
+  }
 
   if (req.method === 'GET') {
     const { userId } = req.query;
-    if (userId) {
+    if (!userId) {
+      return res.status(400).json({ message: 'Missing userId' });
+    }
 
-      const userNotifications = notifications.filter(n => n.userId == userId); // Use == for string/number comparison
-      res.status(200).json(userNotifications);
-    } else {
-      res.status(200).json(notifications);
+    try {
+      // Return unread first, then new to old
+      const notifications = await Notification.find({ recipient: userId })
+        .sort({ read: 1, createdAt: -1 })
+        .limit(50);
+
+      return res.status(200).json(notifications);
+    } catch (e) {
+      return res.status(500).json({ message: 'Error fetching notifications', details: e.message });
     }
-  } else if (req.method === 'POST') {
-    const { userIds, message, type } = req.body;
-    console.log('📢 Creating notifications for userIds:', userIds);
-    const newNotifications = userIds.map(userId => ({
-      id: Date.now() + Math.random(),
-      userId,
-      message,
-      type,
-      read: false,
-      timestamp: new Date().toISOString()
-    }));
-    globalNotifications.push(...newNotifications);
-    console.log('📢 Total notifications now:', globalNotifications.length);
-    res.status(201).json(newNotifications);
+
   } else if (req.method === 'PUT') {
+    // Mark as read
     const { notificationId } = req.body;
-    const notification = globalNotifications.find(n => n.id === notificationId);
-    if (notification) {
-      notification.read = true;
-      res.status(200).json(notification);
-    } else {
-      res.status(404).json({ error: 'Notification not found' });
+    if (!notificationId) return res.status(400).json({ message: 'Missing notificationId' });
+
+    try {
+      const updated = await Notification.findByIdAndUpdate(
+        notificationId,
+        { status: 'read' },
+        { new: true }
+      );
+      if (!updated) return res.status(404).json({ message: 'Notification not found' });
+      return res.status(200).json(updated);
+    } catch (e) {
+      return res.status(500).json({ message: 'Error updating notification' });
     }
+
   } else if (req.method === 'DELETE') {
-    globalNotifications.length = 0;
-    res.status(200).json({ message: 'All notifications cleared' });
+    // Clear all for user
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ message: 'Missing userId' });
+
+    await Notification.deleteMany({ recipient: userId });
+    return res.status(200).json({ message: 'Notifications cleared' });
+
   } else {
     res.status(405).json({ message: 'Method not allowed' });
   }

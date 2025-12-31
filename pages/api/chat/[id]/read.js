@@ -1,5 +1,5 @@
 // pages/api/chat/[id]/read.js
-import dbConnect, { Conversation, Message } from '../../../../lib/db';
+import dbConnect, { Conversation, Message, Notification } from '../../../../lib/db';
 
 export default async function handler(req, res) {
   const { id } = req.query; // conversation id
@@ -61,6 +61,16 @@ export default async function handler(req, res) {
 
     // Add userId to readBy (addToSet prevents duplicates)
     await Message.updateMany(updateFilter, { $addToSet: { readBy: userId } });
+
+    // NEW: Also mark any notifications for this conversation & user as 'read'
+    try {
+      await Notification.updateMany(
+        { recipient: userId, sourceId: id, status: 'unread' },
+        { $set: { status: 'read' } }
+      );
+    } catch (notifErr) {
+      console.error('Failed to cleanup notifications on read', notifErr);
+    }
 
     // Fetch messages to return — if messageIds provided, return those; otherwise return last 50 messages
     let query;

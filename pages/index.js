@@ -26,6 +26,11 @@ export default function Home() {
       localStorage.removeItem('userRole');
       localStorage.removeItem('userEmail');
       localStorage.removeItem('currentUserId');
+
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('userRole');
+      sessionStorage.removeItem('userEmail');
+      sessionStorage.removeItem('currentUserId');
     } catch (err) {
       console.error('Failed to clear auth data on login page', err);
     }
@@ -52,12 +57,18 @@ export default function Home() {
         // store current user id for chat
         if (data.user && data.user._id) {
           localStorage.setItem('currentUserId', data.user._id);
+          sessionStorage.setItem('currentUserId', data.user._id);
         }
 
         // existing behaviour – keep as-is
         localStorage.setItem('token', data.token);
         localStorage.setItem('userRole', data.role);
         localStorage.setItem('userEmail', data.email);
+
+        // session isolation
+        sessionStorage.setItem('token', data.token);
+        sessionStorage.setItem('userRole', data.role);
+        sessionStorage.setItem('userEmail', data.email);
 
         showMessage('Login successful!', 'success');
         router.push(`/${data.role}`);

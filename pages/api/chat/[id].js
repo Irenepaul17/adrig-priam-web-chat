@@ -1,6 +1,6 @@
-// pages/api/chat/[id].js
 import dbConnect, { Conversation, Message } from '../../../lib/db';
 import { uploadToS3 } from '../../../lib/s3';
+import { createNotification } from '../../../lib/notifications';
 
 // defensive notify helpers (no-op if missing)
 let notifyUser = () => { };
@@ -215,6 +215,20 @@ export default async function handler(req, res) {
           );
           const otherId = other?._id?.toString() || other?.toString();
           if (otherId) {
+            // Direct Message Notification
+            const notif = await createNotification(
+              otherId,
+              'New Direct Message',
+              `Message from ${senderName}`,
+              'chat',
+              savedMessage._id
+            );
+
+            if (notif) {
+              notifyUser(otherId, 'notification', notif);
+            }
+
+            // Still call existing socket notifier for real-time (if it works)
             notifyUser(otherId, 'new_direct_message', {
               text: savedMessage.text,
               senderId,
@@ -225,9 +239,23 @@ export default async function handler(req, res) {
             });
           }
         } else {
-          conversation.participants.forEach((member) => {
+          conversation.participants.forEach(async (member) => {
             const memberId = member?._id?.toString() || member?.toString();
             if (memberId !== String(senderId)) {
+              // Group Message Notification
+              const notif = await createNotification(
+                memberId,
+                'New Group Message',
+                `Message from ${senderName || 'someone'}`,
+                'chat',
+                savedMessage._id
+              );
+
+              if (notif) {
+                notifyUser(memberId, 'notification', notif);
+              }
+
+              // still emit legacy event just in case (optional, safe to verify)
               notifyUser(memberId, 'new_group_message', {
                 text: savedMessage.text,
                 senderId,

@@ -1,12 +1,10 @@
-// pages/chat/[id].js
 import { useRouter } from 'next/router';
 import { useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
+import NotificationBell from '../../components/NotificationBell';
 
 
 
-
-const FALLBACK_USER_ID = '69334e1b1297aec66afd63d1'; // safe fallback
 
 export default function ChatPage() {
 
@@ -70,7 +68,6 @@ export default function ChatPage() {
 
 
 
-
   // ---------- helpers ----------
 
   function handleSwipeMove(e, message) {
@@ -91,23 +88,39 @@ export default function ChatPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      const stored = window.localStorage.getItem('currentUserId');
-      setCurrentUserId(stored && stored.trim() ? stored.trim() : FALLBACK_USER_ID);
-      const role = window.localStorage.getItem('userRole');
+      let stored = window.sessionStorage.getItem('currentUserId');
+      let role = window.sessionStorage.getItem('userRole');
+
+      if (!stored) {
+        stored = window.localStorage.getItem('currentUserId');
+        if (stored) window.sessionStorage.setItem('currentUserId', stored);
+      }
+      if (!role) {
+        role = window.localStorage.getItem('userRole');
+        if (role) window.sessionStorage.setItem('userRole', role);
+      }
+
+      // If no user ID is stored, redirect to login
+      if (!stored || !stored.trim()) {
+        console.warn('No user ID found in localStorage, redirecting to login');
+        router.push('/');
+        return;
+      }
+
+      setCurrentUserId(stored.trim());
       setCurrentUserRole(role && role.trim() ? role.trim() : null);
     } catch (err) {
       console.error('Failed to read currentUserId/userRole from localStorage', err);
-      setCurrentUserId(FALLBACK_USER_ID);
-      setCurrentUserRole(null);
+      router.push('/');
     }
-  }, []);
+  }, [router]);
 
   // ---------- socket.io ----------
   const socketRef = useRef(null);
 
   useEffect(() => {
     // init socket
-    socketRef.current = io();
+    socketRef.current = io({ transports: ['websocket'] });
 
     socketRef.current.on('connect', () => {
       console.log('Socket connected:', socketRef.current.id);
@@ -364,6 +377,8 @@ export default function ChatPage() {
   }, [id, currentUserId]);
 
   // poll for updates
+  // poll for updates - DISABLED (Using Pure Sockets)
+  /*
   useEffect(() => {
     if (!id || !currentUserId) return;
     const iv = setInterval(async () => {
@@ -429,6 +444,7 @@ export default function ChatPage() {
     }, 1000);
     return () => clearInterval(iv);
   }, [id, currentUserId]);
+  */
 
   // load all users for adding members
   useEffect(() => {
@@ -535,41 +551,34 @@ export default function ChatPage() {
     if (e && e.preventDefault) e.preventDefault();
     if (!text.trim()) return;
     if (!currentUserId) { alert('User not identified yet. Try again.'); return; }
+    if (!socketRef.current) { alert('Socket not connected. Please wait.'); return; }
 
     const mentionIdsToSend = pendingMentions.length ? pendingMentions : extractMentionIdsFromText(text);
+    const finalVal = replyingTo
+      ? `↪ Replying to: ${replyingTo.text || '[Attachment]'}\n${text}`
+      : text;
 
-    try {
-      const res = await fetch(`/api/chat/${id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderId: currentUserId,
-          text: replyingTo
-            ? `↪ Replying to: ${replyingTo.text || '[Attachment]'}\n${text}`
-            : text,
-          mentions: mentionIdsToSend
-        }),
+    // SOCKET EMIT (No HTTP)
+    const payload = {
+      senderId: currentUserId,
+      conversationId: id,
+      text: finalVal,
+      mentions: mentionIdsToSend
+    };
 
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.message || 'Failed to send message');
-        return;
+    socketRef.current.emit('send_message_secure', payload, (response) => {
+      if (response && response.status === 'ok') {
+        // Success: Append message
+        setMessages(prev => [...prev, response.data]);
+        setText('');
+        setPendingMentions([]);
+        setShowMentionDropdown(false);
+        setReplyingTo(null);
+      } else {
+        console.error('Socket send failed:', response);
+        alert(response?.message || 'Failed to send message via socket');
       }
-      setMessages(prev => [...prev, data]);
-      if (socketRef.current) {
-        socketRef.current.emit('send_message', { room: id, message: data });
-      }
-      setText('');
-      setPendingMentions([]);
-      setShowMentionDropdown(false);
-    } catch (err) {
-      console.error('Failed to send message', err);
-      alert('Error sending message');
-
-    }
-    setReplyingTo(null);
-
+    });
   }
 
 
@@ -902,6 +911,11 @@ export default function ChatPage() {
 
   return (
     <div style={{ minHeight: '100vh', padding: '24px 32px', backgroundColor: '#f5f5f7' }}>
+      {/* Header with Notification Bell */}
+      <div style={{ maxWidth: 1100, margin: '0 auto 16px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+        <NotificationBell />
+      </div>
+
       <div style={{ maxWidth: 1100, margin: '0 auto', display: 'grid', gridTemplateColumns: conversation.type === 'group' ? '280px 1fr' : '1fr', gap: 24, alignItems: 'flex-start' }}>
         {/* Left panel */}
         {conversation.type === 'group' && (

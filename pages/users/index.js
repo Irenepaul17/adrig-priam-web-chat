@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import NotificationBell from '../../components/NotificationBell';
 
 // Helper to safely read current user ID from localStorage without crashing
 function getCurrentUserId() {
@@ -9,7 +10,11 @@ function getCurrentUserId() {
   }
 
   try {
-    const stored = window.localStorage.getItem('currentUserId');
+    let stored = window.sessionStorage.getItem('currentUserId');
+    if (!stored) {
+      stored = window.localStorage.getItem('currentUserId');
+      if (stored) window.sessionStorage.setItem('currentUserId', stored);
+    }
     if (stored && stored.trim()) {
       return stored.trim();
     }
@@ -27,7 +32,11 @@ function getCurrentUserRole() {
   }
 
   try {
-    const stored = window.localStorage.getItem('userRole');
+    let stored = window.sessionStorage.getItem('userRole');
+    if (!stored) {
+      stored = window.localStorage.getItem('userRole');
+      if (stored) window.sessionStorage.setItem('userRole', stored);
+    }
     if (stored && stored.trim()) {
       return stored.trim();
     }
@@ -192,6 +201,9 @@ export default function UsersPage() {
             >
               Start a direct chat with any user or join your existing groups.
             </p>
+          </div>
+          <div style={{ alignSelf: 'center' }}>
+            <NotificationBell iconColor="#111827" />
           </div>
         </header>
 

@@ -1,45 +1,75 @@
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+import { io } from 'socket.io-client';
 
-export default function NotificationBell() {
+export default function NotificationBell({ userRole, iconColor = 'white' }) {
+  const router = useRouter(); // Hook
   const [notifications, setNotifications] = useState([]);
+
+  // Code moved to render phase to prevent Hooks Error
+
   const [showDropdown, setShowDropdown] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000); // Check every 30 seconds
-    return () => clearInterval(interval);
+    // const interval = setInterval(fetchNotifications, 30000); // Keep polling as backup - DISABLED for Pure Socket
+    // return () => clearInterval(interval);
   }, []);
+
+  // NEW: Socket connection effect
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const socket = io({ transports: ['websocket'] });
+    socket.emit('join_room', `user_${currentUserId}`);
+
+    socket.on('notification', (newNotif) => {
+      // SMART FILTER: If user is currently looking at this chat, ignore the notification
+      const currentChatId = router.query.id;
+      if (currentChatId && newNotif.sourceId === currentChatId) {
+        return;
+      }
+
+      console.log('Real-time notification received:', newNotif); // Debug log
+      setNotifications(prev => [newNotif, ...prev]);
+      setUnreadCount(prev => prev + 1);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [currentUserId]);
 
   const fetchNotifications = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const userEmail = localStorage.getItem('userEmail');
+      const token = sessionStorage.getItem('token') || localStorage.getItem('token');
+      const userEmail = sessionStorage.getItem('userEmail') || localStorage.getItem('userEmail');
       if (!token || !userEmail) return;
-      
-      // Get all notifications first
-      const response = await fetch('/api/notifications');
-      if (!response.ok) return;
-      
-      const allNotifications = await response.json();
-      
+
       // Get team data to find current user ID
       const teamResponse = await fetch('/api/team');
       if (!teamResponse.ok) return;
-      
+
       const teamData = await teamResponse.json();
       const currentUser = teamData.find(user => user.email === userEmail);
-      
+
       if (!currentUser) return;
-      
-      // Filter notifications for current user
-      const userNotifications = allNotifications.filter(n => n.userId == currentUser.id);
-      
+
+      // Store ID for socket usage
+      setCurrentUserId(currentUser._id || currentUser.id);
+
+      // Fetch notifications for current user using new schema
+      const response = await fetch(`/api/notifications?userId=${currentUser.id}`);
+      if (!response.ok) return;
+
+      const userNotifications = await response.json();
+
       setNotifications(userNotifications);
-      setUnreadCount(userNotifications.filter(n => !n.read).length);
+      setUnreadCount(userNotifications.filter(n => n.status === 'unread').length);
     } catch (error) {
       console.error('Error fetching notifications:', error);
-      // Fail silently to avoid breaking the UI
     }
   };
 
@@ -50,11 +80,11 @@ export default function NotificationBell() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notificationId })
       });
-      
+
       // Update local state
-      setNotifications(prev => 
-        prev.map(n => 
-          n.id === notificationId ? { ...n, read: true } : n
+      setNotifications(prev =>
+        prev.map(n =>
+          n._id === notificationId ? { ...n, status: 'read' } : n
         )
       );
       setUnreadCount(prev => Math.max(0, prev - 1));
@@ -63,6 +93,11 @@ export default function NotificationBell() {
     }
   };
 
+  // Hide UI on chat pages, but keep socket logic running
+  if (router.pathname.startsWith('/chat')) {
+    return null;
+  }
+
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
       <button
@@ -70,7 +105,7 @@ export default function NotificationBell() {
         style={{
           background: 'none',
           border: 'none',
-          color: 'white',
+          color: iconColor,
           cursor: 'pointer',
           fontSize: '18px',
           position: 'relative',
@@ -106,7 +141,7 @@ export default function NotificationBell() {
           background: 'white',
           border: '1px solid #ddd',
           borderRadius: '4px',
-          width: '300px',
+          width: '320px',
           maxHeight: '400px',
           overflowY: 'auto',
           zIndex: 1000,
@@ -117,47 +152,53 @@ export default function NotificationBell() {
           </div>
           {notifications.length > 0 ? (
             notifications.map(notification => (
-              <div 
-                key={notification.id} 
-                onClick={() => !notification.read && markAsRead(notification.id)}
+              <div
+                key={notification._id}
+                onClick={() => notification.status === 'unread' && markAsRead(notification._id)}
                 style={{
-                  padding: '10px',
+                  padding: '12px',
                   borderBottom: '1px solid #eee',
-                  background: notification.read ? 'white' : '#f8f9fa',
+                  background: notification.status === 'read' ? 'white' : '#f8f9fa',
                   color: '#333',
-                  cursor: notification.read ? 'default' : 'pointer',
+                  cursor: notification.status === 'read' ? 'default' : 'pointer',
                   transition: 'background-color 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  if (!notification.read) {
-                    e.target.style.backgroundColor = '#e9ecef';
+                  if (notification.status === 'unread') {
+                    e.currentTarget.style.backgroundColor = '#e9ecef';
                   }
                 }}
                 onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = notification.read ? 'white' : '#f8f9fa';
+                  e.currentTarget.style.backgroundColor = notification.status === 'read' ? 'white' : '#f8f9fa';
                 }}
               >
-                <div style={{ fontSize: '14px', marginBottom: '5px' }}>
-                  {notification.message}
-                  {!notification.read && (
-                    <span style={{ 
-                      marginLeft: '8px', 
-                      color: '#007bff', 
-                      fontSize: '12px',
-                      fontWeight: 'bold'
+                <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>{notification.title}</span>
+                  {notification.status === 'unread' && (
+                    <span style={{
+                      color: '#007bff',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      background: '#e7f3ff',
+                      padding: '2px 6px',
+                      borderRadius: '10px'
                     }}>
-                      • NEW
+                      NEW
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: '12px', color: '#666' }}>
-                  {new Date(notification.timestamp).toLocaleString()}
+                <div style={{ fontSize: '13px', marginBottom: '6px', color: '#555' }}>
+                  {notification.message}
+                </div>
+                <div style={{ fontSize: '11px', color: '#999', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{new Date(notification.createdAt).toLocaleString()}</span>
+                  <span style={{ textTransform: 'capitalize', color: '#666' }}>{notification.sourceType}</span>
                 </div>
               </div>
             ))
           ) : (
-            <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>
-              No notifications
+            <div style={{ padding: '30px', textAlign: 'center', color: '#999' }}>
+              No notifications yet
             </div>
           )}
         </div>
